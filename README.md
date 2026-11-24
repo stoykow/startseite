@@ -1,6 +1,6 @@
-# Startseite: CI/CD-Demo
+# Startseite
 
-Eine persönliche Startseite mit Links, Gruppen, Profilen und Icons. Die Demo läuft mit PHP 8.3 und MariaDB. Der GitHub-Workflow prüft den Code und kann die App auf einem eigenen Webspace bereitstellen.
+Eine persönliche Startseite mit Links, Gruppen, Profilen und Icons. Die Anwendung läuft mit PHP 8.3 und MariaDB.
 
 ## Lokal ausprobieren
 
@@ -11,7 +11,7 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-Öffne [localhost:28860](http://localhost:28860) und registriere ein eigenes Konto. Die Datenbank und hochgeladenen Icons liegen in Docker-Volumes. Mit `docker compose down` stoppst du die Demo. In PowerShell kannst du die Beispieldatei mit `Copy-Item .env.example .env` kopieren.
+Öffne [localhost:28860](http://localhost:28860) und registriere ein eigenes Konto. Die Datenbank und hochgeladenen Icons liegen in Docker-Volumes. Mit `docker compose down` stoppst du die Anwendung. In PowerShell kannst du die Beispieldatei mit `Copy-Item .env.example .env` kopieren.
 
 ## GitHub Actions im Fork einrichten
 
