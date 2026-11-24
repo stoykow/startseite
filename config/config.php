@@ -4,8 +4,8 @@ declare(strict_types=1);
 const APP_NAME = 'Startseite';
 const APP_BASE_PATH = __DIR__ . '/..';
 const APP_ALLOW_REGISTRATION = true;
-const APP_ALLOW_DEBUG_IMPERSONATION = true;
-const APP_DEFAULT_OWNER_EMAIL = 'nikolay@stoykow.de';
+const APP_ALLOW_DEBUG_IMPERSONATION = false;
+const APP_DEFAULT_OWNER_EMAIL = '';
 
 function envValue(string $key, string $default = ''): string
 {

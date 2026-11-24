@@ -385,7 +385,7 @@ $reusableLinks = $authUser !== null ? fetchReusableLinks($pdo, $userId, $activeG
 $profiles = $authUser !== null ? fetchUserProfiles($pdo, $userId) : [];
 $profileCount = $authUser !== null ? countUserProfiles($pdo, $userId) : 0;
 $currentProfileTokenUrl = $activeProfile !== null
-    ? 'https://start.nik0.de' . appUrl('/index.php', ['token' => $activeProfile['view_token']], false)
+    ? rtrim(envValue('APP_PUBLIC_URL'), '/') . appUrl('/index.php', ['token' => $activeProfile['view_token']], false)
     : null;
 
 $statement = $pdo->prepare(
@@ -1122,11 +1122,14 @@ function justifyKeyword(string $alignMode): string
       padding: 14px;
     }
 
-    .card-icon svg {
-      width: auto;
-      height: auto;
-      max-width: 110px;
-      max-height: 48px;
+    .card-icon > img,
+    .card-icon > svg {
+      display: block;
+      width: 110px;
+      height: 48px;
+      max-width: 100%;
+      flex-shrink: 0;
+      object-fit: contain;
     }
 
     .card-content {
@@ -1436,14 +1439,6 @@ function justifyKeyword(string $alignMode): string
       border-radius: 12px;
       border: 1px solid var(--border);
       background: rgba(5, 12, 22, 0.62);
-    }
-
-    .card-icon img {
-      width: auto;
-      height: auto;
-      max-width: 110px;
-      max-height: 48px;
-      object-fit: contain;
     }
 
     .modal-actions {

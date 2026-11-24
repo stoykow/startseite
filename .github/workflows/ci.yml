@@ -1,229 +1,120 @@
-name: Startseite CI
+name: Startseite CI/CD
 
 on:
   push:
-    branches:
-      - main
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   validate:
-    name: Validate project
+    name: PHP und Beispieldateien prüfen
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup PHP
-        uses: shivammathur/setup-php@v2
+      - uses: actions/checkout@v4
         with:
-          php-version: '8.3'
-
-      - name: PHP syntax check
-        run: find . -path './.git' -prune -o -name '*.php' -print0 | xargs -0 -n1 php -l
-
-      - name: Content smoke checks
+          persist-credentials: false
+      - name: PHP-Syntax prüfen
+        run: |
+          docker run --rm -v "$PWD:/app:ro" -w /app php:8.3-cli \
+            sh -ec 'find . -name "*.php" -print0 | xargs -0 -n1 php -l'
+      - name: Beispieldateien und ignorierte Konfiguration prüfen
         run: |
           test -f .env.example
-          test ! -f .env
-          grep -q "Impressum" impressum_example.php
-          grep -q "Datenschutz" datenschutz_example.php
-          grep -q "legal.css" impressum_example.php
-          grep -q "legal.css" datenschutz_example.php
-
-      - name: Secret leak check
-        run: |
-          if grep -R --exclude="README.md" --exclude=".env.example" --exclude=".gitlab-ci.yml" --exclude-dir=".github" --exclude-dir=".git" "MARIADB_ROOT_PASSWORD=" .; then
-            echo "Geheimer Datenbankwert im Repository gefunden."
-            exit 1
-          fi
+          test ! -e .env
+          test ! -e config/local.php
+          grep -q 'Impressum' impressum_example.php
+          grep -q 'Datenschutzerklärung' datenschutz_example.php
 
   deploy:
-    name: Optional FTP/SFTP deploy
-    runs-on: ubuntu-latest
+    name: Per FTPS bereitstellen und prüfen
     needs: validate
-    if: github.ref == 'refs/heads/main'
-    env:
-      STARTSEITE_DEPLOY_METHOD: ftps
-      STARTSEITE_DEPLOY_PORT: '21'
-      STARTSEITE_DEPLOY_PATH: /
-      STARTSEITE_DEPLOY_CONNECT_TIMEOUT: '30'
-      STARTSEITE_DEPLOY_TIMEOUT: '180'
-      STARTSEITE_DB_HOST: localhost
+    if: github.ref_name == github.event.repository.default_branch && github.event_name != 'pull_request' && vars.STARTSEITE_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: startseite-deploy
+      cancel-in-progress: false
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup PHP
-        uses: shivammathur/setup-php@v2
+      - uses: actions/checkout@v4
         with:
-          php-version: '8.3'
-
-      - name: Install deploy tools
-        run: sudo apt-get update && sudo apt-get install -y lftp openssh-client sshpass
-
-      - name: Create deployed PHP config
+          persist-credentials: false
+      - name: Werkzeuge installieren
+        run: sudo apt-get update && sudo apt-get install -y lftp php-cli
+      - name: Dateien für den Webspace vorbereiten
         env:
-          DB_HOST: ${{ env.STARTSEITE_DB_HOST }}
+          DB_HOST: ${{ vars.STARTSEITE_DB_HOST || 'localhost' }}
           DB_NAME: ${{ secrets.MARIADB_DATABASE }}
           DB_USER: ${{ secrets.MARIADB_USER }}
           DB_PASS: ${{ secrets.MARIADB_PASSWORD }}
-        run: |
-          set -eu
-
-          test -n "$DB_HOST"
-          test -n "$DB_NAME"
-          test -n "$DB_USER"
-          test -n "$DB_PASS"
-
-          php -r '
-          $config = [
-              "DB_HOST" => getenv("DB_HOST"),
-              "DB_NAME" => getenv("DB_NAME"),
-              "DB_USER" => getenv("DB_USER"),
-              "DB_PASS" => getenv("DB_PASS"),
-          ];
-          file_put_contents("config/local.php", "<?php\nreturn " . var_export($config, true) . ";\n");
-          '
-
-      - name: Create demo legal pages
-        env:
+          APP_PUBLIC_URL: ${{ vars.STARTSEITE_PUBLIC_URL }}
           LEGAL_IMPRESSUM_PHP: ${{ secrets.LEGAL_IMPRESSUM_PHP }}
           LEGAL_DATENSCHUTZ_PHP: ${{ secrets.LEGAL_DATENSCHUTZ_PHP }}
         run: |
-          if [ -n "${LEGAL_IMPRESSUM_PHP:-}" ] && [ -n "${LEGAL_DATENSCHUTZ_PHP:-}" ]; then
-            printf '%s' "$LEGAL_IMPRESSUM_PHP" > impressum.php
-            printf '%s' "$LEGAL_DATENSCHUTZ_PHP" > datenschutz.php
-          else
-            cp impressum_example.php impressum.php
-            cp datenschutz_example.php datenschutz.php
+          : "${DB_NAME:?Secret MARIADB_DATABASE fehlt}"
+          : "${DB_USER:?Secret MARIADB_USER fehlt}"
+          : "${DB_PASS:?Secret MARIADB_PASSWORD fehlt}"
+          : "${LEGAL_IMPRESSUM_PHP:?Secret LEGAL_IMPRESSUM_PHP fehlt}"
+          : "${LEGAL_DATENSCHUTZ_PHP:?Secret LEGAL_DATENSCHUTZ_PHP fehlt}"
+          if [[ ! "$APP_PUBLIC_URL" =~ ^https://[^/[:space:]]+/?$ ]]; then
+            echo 'STARTSEITE_PUBLIC_URL muss eine HTTPS-Adresse ohne Unterordner sein.' >&2
+            exit 1
           fi
 
-      - name: Deploy via FTP, FTPS or SFTP
-        timeout-minutes: 10
+          release_dir="$RUNNER_TEMP/startseite-release"
+          mkdir -p "$release_dir/assets/uploads/icons"
+          git archive --output="$RUNNER_TEMP/startseite-release.tar" HEAD \
+            index.php login.php config/auth.css config/bootstrap.php config/config.php \
+            config/legal.css config/link_actions.php config/link_ui.php
+          tar -xf "$RUNNER_TEMP/startseite-release.tar" -C "$release_dir"
+          printf '%s' "$LEGAL_IMPRESSUM_PHP" > "$release_dir/impressum.php"
+          printf '%s' "$LEGAL_DATENSCHUTZ_PHP" > "$release_dir/datenschutz.php"
+          php -l "$release_dir/impressum.php"
+          php -l "$release_dir/datenschutz.php"
+          php -r '
+              $names = ["DB_HOST", "DB_NAME", "DB_USER", "DB_PASS", "APP_PUBLIC_URL"];
+              $config = array_combine($names, array_map("getenv", $names));
+              if (file_put_contents($argv[1], "<?php\nreturn " . var_export($config, true) . ";\n") === false) {
+                  exit(1);
+              }
+          ' "$release_dir/config/local.php"
+      - name: Dateien per FTPS hochladen
         env:
-          DEPLOY_METHOD: ${{ env.STARTSEITE_DEPLOY_METHOD }}
           DEPLOY_HOST: ${{ vars.STARTSEITE_DEPLOY_HOST }}
-          DEPLOY_PORT: ${{ env.STARTSEITE_DEPLOY_PORT }}
+          DEPLOY_PORT: ${{ vars.STARTSEITE_DEPLOY_PORT || '21' }}
+          DEPLOY_PATH: ${{ vars.STARTSEITE_DEPLOY_PATH || '/' }}
           DEPLOY_USER: ${{ secrets.STARTSEITE_DEPLOY_USER }}
-          DEPLOY_PATH: ${{ env.STARTSEITE_DEPLOY_PATH }}
-          DEPLOY_CONNECT_TIMEOUT: ${{ env.STARTSEITE_DEPLOY_CONNECT_TIMEOUT }}
-          DEPLOY_TIMEOUT: ${{ env.STARTSEITE_DEPLOY_TIMEOUT }}
-          DEPLOY_PASSWORD: ${{ secrets.STARTSEITE_DEPLOY_PASSWORD }}
+          LFTP_PASSWORD: ${{ secrets.STARTSEITE_DEPLOY_PASSWORD }}
         run: |
-          set -eu
+          : "${DEPLOY_USER:?Secret STARTSEITE_DEPLOY_USER fehlt}"
+          : "${LFTP_PASSWORD:?Secret STARTSEITE_DEPLOY_PASSWORD fehlt}"
+          if [[ ! "$DEPLOY_HOST" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*$ ||
+                ! "$DEPLOY_PORT" =~ ^[0-9]{1,5}$ ||
+                ! "$DEPLOY_PATH" =~ ^/[a-zA-Z0-9._/-]*$ ||
+                ! "$DEPLOY_USER" =~ ^[a-zA-Z0-9_.@+-]+$ ]]; then
+            echo 'Bitte Host, Port, Webverzeichnis und FTPS-Benutzer prüfen.' >&2
+            exit 1
+          fi
 
-          METHOD="${DEPLOY_METHOD:-ftps}"
-          HOST="${DEPLOY_HOST:?STARTSEITE_DEPLOY_HOST fehlt}"
-          USER="${DEPLOY_USER:?STARTSEITE_DEPLOY_USER fehlt}"
-          PASSWORD="${DEPLOY_PASSWORD:?STARTSEITE_DEPLOY_PASSWORD fehlt}"
-          TARGET_PATH="${DEPLOY_PATH:-/}"
-          CONNECT_TIMEOUT="${DEPLOY_CONNECT_TIMEOUT:-30}"
-          TIMEOUT="${DEPLOY_TIMEOUT:-180}"
-
-          check_tcp_port() {
-            host="$1"
-            port="$2"
-
-            if ! timeout "$CONNECT_TIMEOUT" bash -c '</dev/tcp/$1/$2' _ "$host" "$port"; then
-              echo "::error::Keine TCP-Verbindung zum Deploy-Host auf Port '$port' innerhalb von ${CONNECT_TIMEOUT}s möglich."
-              echo "::error::Prüfe Host, Port, Firewall/IP-Freigabe beim Hoster und ob die gewählte Methode zum Port passt."
-              exit 1
-            fi
-          }
-
-          case "$METHOD" in
-            ftp|ftps)
-              PORT="${DEPLOY_PORT:-21}"
-              SSL_FORCE="false"
-              if [ "$METHOD" = "ftps" ]; then
-                SSL_FORCE="true"
-              fi
-
-              echo "Deploy-Methode: $METHOD"
-              echo "Deploy-Port: $PORT"
-              echo "Verbindungs-Timeout: ${CONNECT_TIMEOUT}s"
-              echo "Upload-Timeout ohne Fortschritt: ${TIMEOUT}s"
-              check_tcp_port "$HOST" "$PORT"
-
-              if ! lftp -u "$USER","$PASSWORD" -p "$PORT" "$HOST" <<EOF
-          set net:timeout $CONNECT_TIMEOUT
-          set net:max-retries 1
-          set xfer:timeout $TIMEOUT
-          set ftp:ssl-force $SSL_FORCE
-          set ftp:ssl-protect-data $SSL_FORCE
-          set ssl:verify-certificate no
-          mirror --reverse --verbose --delete \
-            --exclude-glob .git/ \
-            --exclude-glob .github/ \
-            --exclude-glob .env \
-            --exclude-glob .gitlab-ci.yml \
-            --exclude-glob docker-compose.yml \
-            ./ "$TARGET_PATH"
+          cd "$RUNNER_TEMP/startseite-release"
+          lftp <<EOF
+          set cmd:fail-exit yes
+          set net:timeout 30
+          set net:max-retries 2
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          set ssl:verify-certificate yes
+          open --env-password -u "$DEPLOY_USER" -p "$DEPLOY_PORT" "ftp://$DEPLOY_HOST"
+          mirror --reverse --verbose --transfer-all . "${DEPLOY_PATH%/}/."
           bye
           EOF
-              then
-                echo "::error::FTP/FTPS-Deploy fehlgeschlagen. Bei 'max-retries exceeded' ist der Server unter Methode '$METHOD' auf Port '$PORT' aus dem GitHub-Runner nicht erreichbar oder blockiert den Zugriff."
-                echo "::error::Prüfe Host, Port, FTP/FTPS-Methode, Firewall/IP-Freigabe beim Hoster und die Zugangsdaten."
-                exit 1
-              fi
-              ;;
-
-            sftp)
-              PORT="${DEPLOY_PORT:-22}"
-              echo "Deploy-Methode: $METHOD"
-              echo "Deploy-Port: $PORT"
-              echo "Verbindungs-Timeout: ${CONNECT_TIMEOUT}s"
-              check_tcp_port "$HOST" "$PORT"
-              tar \
-                --exclude='.git/' \
-                --exclude='.github/' \
-                --exclude='.env' \
-                --exclude='.gitlab-ci.yml' \
-                --exclude='docker-compose.yml' \
-                -czf - . \
-              | SSHPASS="$PASSWORD" sshpass -e ssh \
-                -o StrictHostKeyChecking=accept-new \
-                -o ConnectTimeout="$CONNECT_TIMEOUT" \
-                -o ServerAliveInterval=30 \
-                -o ServerAliveCountMax=4 \
-                -p "$PORT" \
-                "$USER@$HOST" \
-                "mkdir -p '$TARGET_PATH' && tar -xzf - -C '$TARGET_PATH'"
-              ;;
-
-            *)
-              echo "Unbekannte Deployment-Methode: $METHOD"
-              echo "Erlaubt sind: ftp, ftps, sftp"
-              exit 1
-              ;;
-          esac
-
-  smoke:
-    name: Optional public smoke test
-    runs-on: ubuntu-latest
-    needs: deploy
-    if: github.ref == 'refs/heads/main'
-    steps:
-      - name: Check public pages
+      - name: Öffentliche Seiten prüfen
         env:
-          STARTSEITE_PUBLIC_URL: ${{ vars.STARTSEITE_PUBLIC_URL }}
+          APP_PUBLIC_URL: ${{ vars.STARTSEITE_PUBLIC_URL }}
         run: |
-          set -eu
-
-          BASE_URL="${STARTSEITE_PUBLIC_URL:?STARTSEITE_PUBLIC_URL fehlt}"
-          BASE_URL="${BASE_URL%/}"
-
-          check_page() {
-            path="$1"
-            expected="$2"
-            url="$BASE_URL/$path"
-
-            echo "Prüfe $url"
-            curl -fsSL --max-time 20 "$url" -o response.html
-            grep -q "$expected" response.html
-          }
-
-          check_page "impressum.php" "Impressum"
-          check_page "datenschutz.php" "Datenschutz"
+          base_url="${APP_PUBLIC_URL%/}"
+          for page in login.php impressum.php datenschutz.php; do
+            curl --fail --silent --show-error --max-time 20 --output /dev/null "$base_url/$page"
+          done

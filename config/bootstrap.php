@@ -779,7 +779,6 @@ function duplicateProfile(PDO $pdo, int $userId, int $profileId, ?string $newNam
 function defaultSeedGroups(): array
 {
     return [
-        ['Interne Seiten', 10],
         ['Externe Seiten', 20],
     ];
 }
@@ -787,16 +786,6 @@ function defaultSeedGroups(): array
 function defaultSeedLinks(): array
 {
     return [
-        ['Interne Seiten', 'GitLab', 'https://gitlab.nik0.internal', 'assets/icons/gitlab.svg', 'preset', 10],
-        ['Interne Seiten', 'Proxmox', 'https://vm.nik0.internal', 'assets/icons/proxmox.svg', 'preset', 20],
-        ['Interne Seiten', 'OpenClaw', 'https://openclaw.nik0.internal', 'assets/icons/openclaw.svg', 'preset', 30],
-        ['Interne Seiten', 'ChromeOpenClaw', 'https://chrome.nik0.internal', 'assets/icons/chrome.svg', 'preset', 40],
-        ['Interne Seiten', 'Home Assistant', 'https://ha.nik0.internal/', 'assets/icons/homeassistant.svg', 'preset', 50],
-        ['Interne Seiten', 'Synology DS920', 'https://synology.nik0.internal/', 'assets/icons/synology.svg', 'preset', 60],
-        ['Interne Seiten', 'FRITZ!Box', 'http://192.168.112.1', 'assets/icons/fritzbox.svg', 'preset', 70],
-        ['Interne Seiten', 'Portainer', 'https://portainer.nik0.internal', 'assets/icons/docker.svg', 'preset', 80],
-        ['Interne Seiten', 'Buha', 'https://buha.nik0.internal', 'assets/icons/buha.svg', 'preset', 90],
-        ['Interne Seiten', 'BuhaDB', 'https://buhadb.nik0.internal', 'assets/icons/mariadb.svg', 'preset', 100],
         ['Externe Seiten', 'Amazon', 'https://www.amazon.de', 'assets/icons/amazon-light.svg', 'preset', 10],
         ['Externe Seiten', 'Thingiverse', 'https://www.thingiverse.com', 'assets/icons/thingiverse.svg', 'preset', 20],
         ['Externe Seiten', 'GitHub', 'https://github.com', 'assets/icons/github-light.svg', 'preset', 30],
@@ -1089,7 +1078,6 @@ function debugEmailForToken(?string $token): ?string
     }
 
     return match ($token) {
-        'niko' => APP_DEFAULT_OWNER_EMAIL,
         default => null,
     };
 }

@@ -1,63 +1,40 @@
 services:
   db:
     image: mariadb:11
-    container_name: startseite-db
-    restart: unless-stopped
     environment:
-      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD}
-      MARIADB_DATABASE: ${MARIADB_DATABASE}
-      MARIADB_USER: ${MARIADB_USER}
-      MARIADB_PASSWORD: ${MARIADB_PASSWORD}
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:?Bitte .env einrichten}
+      MARIADB_DATABASE: ${MARIADB_DATABASE:?Bitte .env einrichten}
+      MARIADB_USER: ${MARIADB_USER:?Bitte .env einrichten}
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD:?Bitte .env einrichten}
     volumes:
-      - /srv/docker/startseite/data/db:/var/lib/mysql
+      - database:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   app:
-    image: php:8.3-apache
-    container_name: startseite-app
-    restart: unless-stopped
+    build: .
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     environment:
-      SSH_USER: ${SSH_USER}
-      SSH_PASSWORD: ${SSH_PASSWORD}
-      SSH_PUBLIC_KEY: ${SSH_PUBLIC_KEY}
       DB_HOST: db
       DB_NAME: ${MARIADB_DATABASE}
       DB_USER: ${MARIADB_USER}
       DB_PASS: ${MARIADB_PASSWORD}
+      APP_PUBLIC_URL: http://localhost:28860
+    ports:
+      - "127.0.0.1:28860:80"
     volumes:
-      - /srv/docker/startseite/data/htdocs:/var/www/html
-    command: >
-      bash -lc "
-        apt-get update &&
-        DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-server ca-certificates &&
-        docker-php-ext-install pdo_mysql mysqli &&
-        mkdir -p /run/sshd &&
-        ssh-keygen -A &&
-        id -u \"$SSH_USER\" >/dev/null 2>&1 || useradd -m -s /bin/bash \"$SSH_USER\" &&
-        echo \"$SSH_USER:$SSH_PASSWORD\" | chpasswd &&
-        mkdir -p /home/$SSH_USER/.ssh &&
-        printf '%s\n' \"$SSH_PUBLIC_KEY\" > /home/$SSH_USER/.ssh/authorized_keys &&
-        chown -R $SSH_USER:$SSH_USER /home/$SSH_USER/.ssh &&
-        chmod 700 /home/$SSH_USER/.ssh &&
-        chmod 600 /home/$SSH_USER/.ssh/authorized_keys &&
-        chown -R $SSH_USER:$SSH_USER /var/www/html &&
-        /usr/sbin/sshd &&
-        apache2-foreground
-      "
-    ports:
-      - "28860:80"
-      - "28862:22"
+      - ./index.php:/var/www/html/index.php:ro
+      - ./login.php:/var/www/html/login.php:ro
+      - ./config:/var/www/html/config:ro
+      - ./impressum_example.php:/var/www/html/impressum.php:ro
+      - ./datenschutz_example.php:/var/www/html/datenschutz.php:ro
+      - uploads:/var/www/html/assets/uploads/icons
 
-  phpmyadmin:
-    image: phpmyadmin/phpmyadmin:5.2
-    container_name: startseite-phpmyadmin
-    restart: unless-stopped
-    depends_on:
-      - db
-    environment:
-      PMA_HOST: db
-      PMA_PORT: 3306
-      UPLOAD_LIMIT: 64M
-    ports:
-      - "28861:80"
+volumes:
+  database:
+  uploads:
